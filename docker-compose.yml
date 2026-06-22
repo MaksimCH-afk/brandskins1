@@ -1,0 +1,22 @@
+# Поднять сайт:           docker compose up --build         (→ http://localhost:8080)
+# Сменить бренд на лету:  см. DOCKER.md (монтирование brand.css)
+# Прогнать экстрактор:    docker compose --profile tools run --rm tools \
+#                           python tools/extract_brand.py refs/*.png --name X \
+#                           -o css/brand.X.css --report out/report.md --enforce-contrast
+services:
+  web:
+    build: .
+    image: brandskins
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  tools:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    image: brandskins-tools
+    profiles: ["tools"]
+    volumes:
+      - .:/work
+    working_dir: /work

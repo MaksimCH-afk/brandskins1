@@ -17,6 +17,8 @@ css/brand.casinorex.css    — пример заполнения brand.css (бр
 css/brand.fraga.css        — пример АВТО-генерации из скриншотов (бренд Fraga)
 tools/extract_brand.py     — скрипт авто-определения цветов из скриншотов → brand.css
 out/                       — результаты работы скрипта (отчёт + превью палитры)
+Dockerfile / Dockerfile.tools / docker-compose.yml — запуск в Docker (см. DOCKER.md)
+refs/                      — сюда класть референс-скриншоты для экстрактора
 js/main.js                 — меню, drawer, модалка, табы каталога, переключатель языков, редирект
 assets/img/flags/          — флаги для переключателя языков (SVG, оставлены)
 assets/{fonts,icons,video} — пустые папки под ваши ассеты
