@@ -3,3 +3,4 @@ gunicorn>=26,<27
 Pillow>=12
 numpy>=2.4
 scikit-learn>=1.8
+pytesseract>=0.3.10
