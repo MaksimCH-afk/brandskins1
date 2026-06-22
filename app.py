@@ -4,13 +4,16 @@ Brandskins control panel + static site server.
 
   /        -> сам статический сайт (из примонтированного репозитория /site)
   /admin   -> панель управления:
-                - список тем-брендов с цветовыми превью и переключением на лету
-                - экстрактор: загрузка до 10 скриншотов (png/jpg/jpeg/webp),
-                  авто-определение названия бренда с логотипа (OCR) и палитры
-                - предпросмотр сайта в трёх размерах: мобильный, планшет, ПК
+                - список тем с цветовыми превью и переключением на лету
+                - экстрактор: до 10 скриншотов (png/jpg/jpeg/webp),
+                  OCR названия бренда с логотипа, авто-палитра
+                - предпросмотр сайта в реальных разрешениях: 320 / 700 / 1440
+                - «Скачать макет»: готовый статический сайт с применённой темой (zip)
 """
 import os
 import re
+import io
+import zipfile
 import shutil
 import subprocess
 import sys
@@ -37,7 +40,14 @@ ACTIVE = os.path.join(CSS_DIR, "brand.css")
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp"}
 MAX_IMAGES = 10
 
-# слова из шаблона/навигации, которые не являются названием бренда
+# что не кладём в скачиваемый макет (служебное/сборочное)
+BUILD_EXCLUDE_TOP = {
+    "app.py", "Dockerfile", "Dockerfile.dashboard", "Dockerfile.tools",
+    "docker-compose.yml", "docker-compose.dashboard.yml", "requirements.txt",
+    "DOCKER.md", "README.md", "BRANDING.md", ".gitignore", ".dockerignore",
+}
+BUILD_EXCLUDE_DIRS = {".git", "tools", "out", "refs", "__pycache__", "dashboard"}
+
 OCR_STOP = {
     "logo", "review", "bonuses", "deposits", "app", "login", "log", "in",
     "withdraw", "register", "now", "menu", "placeholder", "section", "heading",
@@ -53,7 +63,6 @@ app = Flask(__name__)
 
 # ----------------------------------------------------------------------------- helpers
 def ensure_stock_backup():
-    """Сохраняем эталонную brand.css как brand.stock.css один раз — при старте."""
     try:
         if os.path.isfile(ACTIVE) and not os.path.isfile(STOCK_BACKUP):
             shutil.copyfile(ACTIVE, STOCK_BACKUP)
@@ -75,7 +84,6 @@ def brand_key_from_filename(fn):
 
 
 def parse_theme_colors(path):
-    """Достаём ключевые цвета темы для цветного превью в списке."""
     colors = {}
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -109,11 +117,8 @@ def list_brands():
             except Exception:
                 is_active = False
             brands.append({
-                "key": key,
-                "file": fn,
-                "label": key.replace(".", " · "),
-                "active": is_active,
-                "colors": parse_theme_colors(path),
+                "key": key, "file": fn, "label": key.replace(".", " · "),
+                "active": is_active, "colors": parse_theme_colors(path),
             })
     any_active = any(b["active"] for b in brands)
     return brands, any_active
@@ -129,16 +134,12 @@ def safe_site_path(rel):
 
 
 def detect_brand_name(paths):
-    """OCR по загруженным картинкам: ищем самое крупное «логотипное» слово."""
     if not _HAS_OCR:
         return ""
-    best = None  # (score, word)
+    best = None
     for p in paths:
         try:
             im = Image.open(p).convert("RGB")
-        except Exception:
-            continue
-        try:
             data = pytesseract.image_to_data(im, output_type=pytesseract.Output.DICT)
         except Exception:
             continue
@@ -197,7 +198,6 @@ def api_switch():
 def api_extract():
     if not os.path.isfile(EXTRACTOR):
         return jsonify({"ok": False, "error": "Экстрактор не найден: %s" % EXTRACTOR}), 500
-
     files = request.files.getlist("images")
     if not files:
         return jsonify({"ok": False, "error": "Не загружены скриншоты"}), 400
@@ -222,12 +222,11 @@ def api_extract():
             dst = os.path.join(tmpdir, "%02d_%s" % (i, base))
             f.save(dst)
             try:
-                Image.open(dst).verify()       # это действительно картинка?
+                Image.open(dst).verify()
             except Exception:
                 return jsonify({"ok": False, "error": "Битый файл: %s" % base}), 400
             img_paths.append(dst)
 
-        # имя бренда: поле -> OCR с логотипа -> авто-нумерация
         name = (request.form.get("name") or "").strip()
         detected = ""
         if not name:
@@ -238,7 +237,6 @@ def api_extract():
         os.makedirs(OUT_DIR, exist_ok=True)
         out_css = os.path.join(CSS_DIR, "brand.%s.css" % slug)
         report = os.path.join(OUT_DIR, "%s-report.md" % slug)
-
         cmd = [sys.executable, EXTRACTOR, *img_paths,
                "--name", name, "-o", out_css, "--report", report]
         if enforce:
@@ -246,23 +244,16 @@ def api_extract():
         if variants > 0:
             cmd += ["--variants", str(variants)]
 
-        proc = subprocess.run(cmd, cwd=SITE_ROOT, capture_output=True,
-                              text=True, timeout=300)
+        proc = subprocess.run(cmd, cwd=SITE_ROOT, capture_output=True, text=True, timeout=300)
         report_text = ""
         if os.path.isfile(report):
             with open(report, "r", encoding="utf-8", errors="replace") as rf:
                 report_text = rf.read()
-
         ok = proc.returncode == 0 and os.path.isfile(out_css)
         return jsonify({
-            "ok": ok,
-            "name": name,
-            "detected": detected,
-            "slug": slug,
-            "file": "brand.%s.css" % slug,
-            "returncode": proc.returncode,
-            "stdout": proc.stdout[-4000:],
-            "stderr": proc.stderr[-4000:],
+            "ok": ok, "name": name, "detected": detected, "slug": slug,
+            "file": "brand.%s.css" % slug, "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:], "stderr": proc.stderr[-4000:],
             "report": report_text[:20000],
         }), (200 if ok else 500)
     except subprocess.TimeoutExpired:
@@ -271,6 +262,32 @@ def api_extract():
         return jsonify({"ok": False, "error": str(e)}), 500
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@app.get("/admin/api/build")
+def api_build():
+    """Собрать готовый статический сайт с текущей темой в zip."""
+    root = os.path.realpath(SITE_ROOT)
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+        for dirpath, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in BUILD_EXCLUDE_DIRS]
+            rel_dir = os.path.relpath(dirpath, root)
+            for fn in files:
+                if rel_dir == "." and fn in BUILD_EXCLUDE_TOP:
+                    continue
+                if fn.endswith((".pyc", ".pyo")):
+                    continue
+                # в макет кладём только активную brand.css (без вариантов/стока)
+                if rel_dir == "css" and re.match(r"^brand\..+\.css$", fn) and fn != "brand.css":
+                    continue
+                full = os.path.join(dirpath, fn)
+                z.write(full, os.path.relpath(full, root))
+    mem.seek(0)
+    brands, _ = list_brands()
+    active = next((b["key"] for b in brands if b["active"]), "build")
+    return send_file(mem, mimetype="application/zip", as_attachment=True,
+                     download_name="brandskins-%s.zip" % slugify(active))
 
 
 @app.get("/admin")
@@ -318,7 +335,7 @@ DASHBOARD_HTML = r"""<!doctype html>
   :root{
     --bg:#0e1411;--panel:#151d18;--panel-2:#1b251f;--line:#27332b;--txt:#e8efe9;
     --muted:#8fa394;--gold:#e8b84b;--gold-hi:#f7d579;--gold-deep:#b6862c;
-    --ok:#46c98a;--err:#e06464;--radius:14px;
+    --ok:#46c98a;--err:#e06464;--radius:14px;--sb:#0b100d;--sbthumb:#33433a;
   }
   *{box-sizing:border-box}
   body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -329,15 +346,14 @@ DASHBOARD_HTML = r"""<!doctype html>
          background:rgba(14,20,17,.85);backdrop-filter:blur(8px)}
   .brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.3px}
   .dot{width:10px;height:10px;border-radius:50%;background:var(--gold);box-shadow:0 0 12px var(--gold)}
-  .wrap{display:grid;grid-template-columns:minmax(0,400px) 1fr;gap:20px;padding:20px 24px;max-width:1600px;margin:0 auto}
+  .hactions{display:flex;gap:14px;align-items:center}
+  .wrap{display:grid;grid-template-columns:minmax(0,400px) 1fr;gap:20px;padding:20px 24px;max-width:1700px;margin:0 auto}
   @media (max-width:980px){.wrap{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
   .card h2{margin:0 0 4px;font-size:15px;letter-spacing:.4px;text-transform:uppercase;color:var(--gold)}
   .card .sub{margin:0 0 16px;color:var(--muted);font-size:13px}
-  .mt{margin-top:14px}
-  .muted{color:var(--muted)}
+  .mt{margin-top:14px}.muted{color:var(--muted)}
   code{font-family:ui-monospace,Menlo,monospace}
-  /* brands */
   .brands{display:flex;flex-direction:column;gap:10px}
   .brow{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--panel-2);
         border:1px solid var(--line);border-radius:12px;padding:12px 14px}
@@ -365,16 +381,22 @@ DASHBOARD_HTML = r"""<!doctype html>
   pre{white-space:pre-wrap;word-break:break-word;background:#0b100d;border:1px solid var(--line);
       border-radius:10px;padding:12px;max-height:280px;overflow:auto;font-size:12px;color:var(--muted)}
   details summary{cursor:pointer;color:var(--muted);font-size:13px}
-  /* preview devices */
   .preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
   .preview-head h2{margin:0}
-  .devrow{display:flex;gap:18px;align-items:flex-start}
-  @media (max-width:680px){.devrow{flex-direction:column}}
+  .devrow{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
   .dev{display:flex;flex-direction:column;gap:8px;min-width:0}
   .devlabel{font-size:12px;color:var(--muted);letter-spacing:.3px}
-  .frame{position:relative;width:100%;overflow:hidden;border:1px solid var(--line);border-radius:12px;background:#000}
-  .frame .screen{position:absolute;top:0;left:0;transform-origin:top left}
-  .frame iframe{width:100%;height:100%;border:0;display:block;background:#000}
+  .frame{border:1px solid var(--line);border-radius:12px;background:#000}
+  /* 1:1 кадры (мобильный/планшет): вертикальный скролл в отдельном жёлобе справа */
+  .frame.fit{overflow-y:scroll;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--sbthumb) var(--sb)}
+  .frame.fit::-webkit-scrollbar{width:12px}
+  .frame.fit::-webkit-scrollbar-track{background:var(--sb);border-radius:0 12px 12px 0}
+  .frame.fit::-webkit-scrollbar-thumb{background:var(--sbthumb);border-radius:8px;border:3px solid var(--sb)}
+  .frame.fit iframe{border:0;display:block;background:#000}
+  /* ПК: масштаб под ширину карточки, вся страница, без скролла */
+  .frame.scale{position:relative;width:100%;overflow:hidden}
+  .frame.scale .screen{position:absolute;top:0;left:0;transform-origin:top left}
+  .frame.scale iframe{width:100%;height:100%;border:0;display:block;background:#000}
   .toast{position:fixed;right:20px;bottom:20px;background:var(--panel-2);border:1px solid var(--line);
          border-left:3px solid var(--gold);border-radius:10px;padding:12px 16px;max-width:380px;
          box-shadow:0 8px 30px rgba(0,0,0,.4);opacity:0;transform:translateY(8px);transition:.2s;z-index:50}
@@ -385,14 +407,17 @@ DASHBOARD_HTML = r"""<!doctype html>
 <body>
 <header>
   <div class="brand"><span class="dot"></span> Brandskins · панель управления</div>
-  <div><a href="/" target="_blank" rel="noopener">Открыть сайт ↗</a></div>
+  <div class="hactions">
+    <button id="dl-build" class="apply" style="padding:8px 14px">Скачать макет</button>
+    <a href="/" target="_blank" rel="noopener">Открыть сайт ↗</a>
+  </div>
 </header>
 
 <div class="wrap">
   <div class="col">
     <div class="card">
       <h2>Темы брендов</h2>
-      <p class="sub">Применение копирует выбранную тему в <code>css/brand.css</code> — сайт обновляется без пересборки.</p>
+      <p class="sub">Применение копирует тему в <code>css/brand.css</code> — сайт обновляется без пересборки.</p>
       <div class="brands" id="brands">загрузка…</div>
     </div>
 
@@ -402,7 +427,7 @@ DASHBOARD_HTML = r"""<!doctype html>
       <div class="field">
         <label>Название бренда <span class="muted">(необязательно)</span></label>
         <input type="text" id="ex-name" placeholder="оставьте пустым — распознаю с логотипа">
-        <div class="hint" id="ocr-hint">Если поле пустое — название считывается с логотипа на скриншотах (OCR). Если не распозналось — тема получит авто-имя.</div>
+        <div class="hint" id="ocr-hint">Если поле пустое — название считывается с логотипа на скриншотах (OCR). Не распозналось — будет авто-имя.</div>
       </div>
       <div class="field">
         <label>Скриншоты — до 10 файлов (png, jpg, jpeg, webp)</label>
@@ -415,11 +440,10 @@ DASHBOARD_HTML = r"""<!doctype html>
         </label>
       </div>
       <div class="hint">
-        <b>Акцент</b> — главный выделяющий цвет шаблона (кнопки, активные пункты меню, цифры, рамки, свечение).
-        Основную тему экстрактор делает сам. <b>Варианты акцента = N</b> — это N дополнительных тем,
-        где акцентом взяты другие заметные цвета со скриншотов, чтобы было из чего выбрать
-        (файлы <code>…alt1.css</code>, <code>…alt2.css</code>). Реальное число ограничено тем,
-        сколько разных цветов нашлось на картинках.
+        <b>Акцент</b> — главный выделяющий цвет (кнопки, активные пункты меню, цифры, рамки, свечение).
+        Основную тему экстрактор делает сам. <b>Варианты акцента = N</b> создаёт N запасных тем
+        с другими акцентами на выбор (<code>…alt1.css</code>, <code>…alt2.css</code>);
+        фактическое число ограничено числом разных цветов на скриншотах.
       </div>
       <div class="mt"><button id="ex-run" class="apply">Сгенерировать тему</button></div>
       <div id="ex-result" class="mt"></div>
@@ -433,24 +457,18 @@ DASHBOARD_HTML = r"""<!doctype html>
         <button id="reload">Обновить ⟳</button>
       </div>
       <div class="devrow">
-        <div class="dev" style="flex:390 1 0">
-          <div class="devlabel">📱 Мобильная · 390px</div>
-          <div class="frame" data-w="390" data-h="844" data-maxh="560">
-            <div class="screen"><iframe id="pv-mobile" src="/" loading="lazy"></iframe></div>
-          </div>
+        <div class="dev">
+          <div class="devlabel">📱 Мобильная · 320px (1:1)</div>
+          <div class="frame fit" data-w="320" data-vh="640"><iframe id="pv-mobile" src="/"></iframe></div>
         </div>
-        <div class="dev" style="flex:820 1 0">
-          <div class="devlabel">📲 Планшет · 820px</div>
-          <div class="frame" data-w="820" data-h="1180" data-maxh="560">
-            <div class="screen"><iframe id="pv-tablet" src="/" loading="lazy"></iframe></div>
-          </div>
+        <div class="dev">
+          <div class="devlabel">📲 Планшет · 700px (1:1)</div>
+          <div class="frame fit" data-w="700" data-vh="900"><iframe id="pv-tablet" src="/"></iframe></div>
         </div>
       </div>
-      <div class="dev mt" style="margin-top:18px">
-        <div class="devlabel">🖥 ПК · 1440px</div>
-        <div class="frame" data-w="1440" data-h="900" data-maxh="720">
-          <div class="screen"><iframe id="pv-desktop" src="/" loading="lazy"></iframe></div>
-        </div>
+      <div class="dev" style="margin-top:18px">
+        <div class="devlabel">🖥 ПК · 1440px (по ширине)</div>
+        <div class="frame scale" data-w="1440"><div class="screen"><iframe id="pv-desktop" src="/"></iframe></div></div>
       </div>
     </div>
   </div>
@@ -464,46 +482,56 @@ const $$=s=>Array.from(document.querySelectorAll(s));
 function toast(m,k){const t=$("#toast");t.textContent=m;t.className="toast show "+(k||"");setTimeout(()=>t.className="toast",3400);}
 function escapeHtml(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 
-function fitDevices(){
-  $$(".frame").forEach(fr=>{
-    const w=+fr.dataset.w,h=+fr.dataset.h,maxh=+fr.dataset.maxh||700;
-    const avail=fr.clientWidth||1;
-    let k=avail/w; if(h*k>maxh)k=maxh/h;
-    const sc=fr.querySelector(".screen");
-    sc.style.width=w+"px"; sc.style.height=h+"px"; sc.style.transform="scale("+k+")";
-    const scaledW=w*k;
-    sc.style.left=Math.max(0,(avail-scaledW)/2)+"px";
-    fr.style.height=(h*k)+"px";
+function pageHeight(f){
+  try{const d=f.contentDocument;return Math.max(d.documentElement.scrollHeight,d.body?d.body.scrollHeight:0)||0;}
+  catch(e){return 0;}
+}
+function measureFit(f){const h=pageHeight(f);f.style.height=(h||2600)+"px";}
+function sizeScale(fr){
+  const w=+fr.dataset.w, avail=fr.clientWidth||1, k=avail/w;
+  const sc=fr.querySelector(".screen"), f=fr.querySelector("iframe");
+  const h=pageHeight(f)||2200;
+  sc.style.width=w+"px"; sc.style.height=h+"px"; sc.style.transform="scale("+k+")";
+  fr.style.height=(h*k)+"px";
+}
+function initPreview(){
+  $$(".frame.fit").forEach(fr=>{
+    const w=+fr.dataset.w, vh=+fr.dataset.vh, sb=12;   // 12px — отдельный жёлоб под скролл
+    fr.style.width=(w+sb)+"px"; fr.style.height=vh+"px";
+    const f=fr.querySelector("iframe"); f.style.width=w+"px";
+    f.addEventListener("load",()=>measureFit(f));
+    measureFit(f);
+  });
+  $$(".frame.scale").forEach(fr=>{
+    const f=fr.querySelector("iframe");
+    f.addEventListener("load",()=>sizeScale(fr));
+    sizeScale(fr);
   });
 }
-let rt;window.addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(fitDevices,120);});
+let rt;window.addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(()=>$$(".frame.scale").forEach(sizeScale),120);});
 
 function reloadPreview(){
   const t=Date.now();
   ["pv-mobile","pv-tablet","pv-desktop"].forEach(id=>{const f=document.getElementById(id);if(f)f.src="/?_t="+t;});
-  setTimeout(fitDevices,60);
 }
 $("#reload").onclick=reloadPreview;
+$("#dl-build").onclick=()=>{toast("Собираю макет…","ok");window.location.href="/admin/api/build";};
 
 async function loadBrands(){
   const box=$("#brands");
   try{
     const r=await fetch("/admin/api/brands");const d=await r.json();
-    if(!d.ocr){$("#ocr-hint").innerHTML="OCR недоступен в этом контейнере — название берётся из поля или авто-имя. Пересоберите образ, чтобы включить распознавание с логотипа.";}
+    if(!d.ocr)$("#ocr-hint").innerHTML="OCR недоступен в этом контейнере — название берётся из поля или авто-имя. Пересоберите образ, чтобы включить распознавание с логотипа.";
     box.innerHTML="";
-    if(d.custom){
-      const n=document.createElement("div");n.className="muted";n.style.marginBottom="10px";
-      n.textContent="Активная brand.css изменена вручную и не совпадает ни с одной темой.";box.appendChild(n);
-    }
+    if(d.custom){const n=document.createElement("div");n.className="muted";n.style.marginBottom="10px";
+      n.textContent="Активная brand.css изменена вручную и не совпадает ни с одной темой.";box.appendChild(n);}
     d.brands.forEach(b=>{
       const row=document.createElement("div");row.className="brow";
       const meta=document.createElement("div");meta.className="meta";
       const nm=document.createElement("div");nm.className="name";nm.textContent=b.label;
       const fl=document.createElement("div");fl.className="file";fl.textContent=b.file;
       const sw=document.createElement("div");sw.className="sw";
-      ["c-accent","c-cta","c-bg","surface"].forEach(c=>{
-        if(b.colors&&b.colors[c]){const i=document.createElement("i");i.style.background=b.colors[c];i.title=c+": "+b.colors[c];sw.appendChild(i);}
-      });
+      ["c-accent","c-cta","c-bg","surface"].forEach(c=>{if(b.colors&&b.colors[c]){const i=document.createElement("i");i.style.background=b.colors[c];i.title=c+": "+b.colors[c];sw.appendChild(i);}});
       meta.appendChild(nm);meta.appendChild(fl);if(sw.children.length)meta.appendChild(sw);
       const right=document.createElement("div");right.className="row";
       if(b.active){const bd=document.createElement("span");bd.className="badge";bd.textContent="активна";right.appendChild(bd);}
@@ -513,18 +541,15 @@ async function loadBrands(){
     if(!d.brands.length)box.innerHTML="<div class='muted'>Тем не найдено в css/</div>";
   }catch(e){box.innerHTML="<div class='muted'>Ошибка загрузки: "+e+"</div>";}
 }
-
 async function switchBrand(key,btn){
   if(btn){btn.disabled=true;btn.textContent="…";}
   try{
     const r=await fetch("/admin/api/switch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})});
     const d=await r.json();
-    if(d.ok){toast("Тема применена: "+key,"ok");await loadBrands();reloadPreview();}
-    else toast(d.error||"Ошибка","err");
+    if(d.ok){toast("Тема применена: "+key,"ok");await loadBrands();reloadPreview();}else toast(d.error||"Ошибка","err");
   }catch(e){toast(String(e),"err");}
   finally{if(btn){btn.disabled=false;btn.textContent="Применить";}}
 }
-
 $("#ex-run").onclick=async()=>{
   const files=$("#ex-files").files;
   if(!files.length){toast("Выберите скриншоты","err");return;}
@@ -544,17 +569,14 @@ $("#ex-run").onclick=async()=>{
       if(d.detected)html+="<p class='muted'>Название распознано с логотипа: <b style='color:var(--txt)'>"+escapeHtml(d.detected)+"</b></p>";
       if(d.report)html+="<details open><summary>Отчёт по палитре</summary><pre>"+escapeHtml(d.report)+"</pre></details>";
       res.innerHTML=html;await loadBrands();
-    }else{
-      res.innerHTML="<pre>"+escapeHtml((d.error||"")+"\n"+(d.stderr||"")+"\n"+(d.stdout||""))+"</pre>";
-      toast("Ошибка экстрактора","err");
-    }
+    }else{res.innerHTML="<pre>"+escapeHtml((d.error||"")+"\n"+(d.stderr||"")+"\n"+(d.stdout||""))+"</pre>";toast("Ошибка экстрактора","err");}
   }catch(e){res.innerHTML="<pre>"+escapeHtml(String(e))+"</pre>";toast(String(e),"err");}
   finally{btn.disabled=false;btn.textContent="Сгенерировать тему";}
 };
 
 loadBrands();
-window.addEventListener("load",()=>setTimeout(fitDevices,80));
-setTimeout(fitDevices,300);
+initPreview();
+window.addEventListener("load",()=>setTimeout(()=>{$$(".frame.fit").forEach(fr=>measureFit(fr.querySelector("iframe")));$$(".frame.scale").forEach(sizeScale);},120));
 </script>
 </body>
 </html>
