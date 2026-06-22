@@ -1,0 +1,10 @@
+# Образ панели управления Brandskins: отдаёт сайт + дашборд на порту 8888.
+# Репозиторий монтируется внутрь как том (/site) — см. docker-compose.yml.
+FROM python:3.13-slim
+ENV PYTHONUNBUFFERED=1 SITE_ROOT=/site
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+EXPOSE 8888
+CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:8888", "--timeout", "300", "app:app"]

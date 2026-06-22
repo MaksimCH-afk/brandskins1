@@ -1,22 +1,21 @@
-# Поднять сайт:           docker compose up --build         (→ http://localhost:8080)
-# Сменить бренд на лету:  см. DOCKER.md (монтирование brand.css)
-# Прогнать экстрактор:    docker compose --profile tools run --rm tools \
-#                           python tools/extract_brand.py refs/*.png --name X \
-#                           -o css/brand.X.css --report out/report.md --enforce-contrast
+# ============================================================
+#  Brandskins — локальный запуск с дашбордом управления.
+#  Поднять:    docker compose up --build
+#  Дашборд:    http://localhost:8888/admin
+#  Сайт:       http://localhost:8888/
+#  Остановить: Ctrl+C   (или: docker compose down)
+# ============================================================
 services:
-  web:
-    build: .
-    image: brandskins
-    ports:
-      - "8080:80"
-    restart: unless-stopped
-
-  tools:
+  dashboard:
     build:
       context: .
-      dockerfile: Dockerfile.tools
-    image: brandskins-tools
-    profiles: ["tools"]
+      dockerfile: Dockerfile.dashboard
+    image: brandskins-dashboard
+    container_name: brandskins
+    ports:
+      - "8888:8888"          # хост:контейнер
     volumes:
-      - .:/work
-    working_dir: /work
+      - ./:/site             # весь репозиторий внутрь; смена тем пишется в реальные файлы
+    environment:
+      - SITE_ROOT=/site
+    restart: unless-stopped
