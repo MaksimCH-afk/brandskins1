@@ -545,7 +545,7 @@ function sizeScale(fr){
 }
 function initPreview(){
   $$(".frame.fit").forEach(fr=>{
-    const w=+fr.dataset.w, vh=+fr.dataset.vh, sb=10;
+    const w=+fr.dataset.w, vh=+fr.dataset.vh, sb=18;
     fr.style.width=(w+sb)+"px"; fr.style.height=vh+"px";
     const f=fr.querySelector("iframe"); f.style.width=w+"px";
     f.addEventListener("load",()=>measureFit(f)); measureFit(f);
