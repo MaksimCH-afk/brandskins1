@@ -505,3 +505,17 @@ p{margin:0;}
 @media(prefers-reduced-motion:reduce){
   *{transition:none !important;animation:none !important;}
 }
+
+/* ---- мобильная шапка: одна кнопка до 390px, вторая с 390px ---- */
+@media(max-width:480px){
+  .nav-inner{gap:10px;padding:0 14px;}
+  .nav-logo{height:26px;}
+  .nav-right{gap:8px;}
+  .btn-nav{padding:8px 13px;font-size:13px;}
+}
+@media(max-width:389px){
+  .nav-right .ghost{display:none;}   /* вторая кнопка (Log In) только с 390px */
+  .nav-inner{gap:8px;padding:0 12px;}
+  .nav-logo{height:24px;}
+  .btn-nav{padding:8px 12px;font-size:12.5px;}
+}

@@ -29,7 +29,7 @@
 </header>
 
 <!-- ============================ HERO ============================ -->
-<section class="tile hero band-dark" data-band="a" data-screen-label="Hero">
+<section class="tile hero band-dark" data-band="a">
   <div class="hero-glow"></div>
   <div class="wrap center">
     <p class="eyebrow">Cowboyspin Casino · Welcome Offer</p>
@@ -49,7 +49,7 @@
 </section>
 
 <!-- ============================ WELCOME / PROMO TICKET ============================ -->
-<section class="tile band-light" id="bonus" data-band="b" data-screen-label="Welcome bonus">
+<section class="tile band-light" id="bonus" data-band="b">
   <div class="wrap promo">
     <div class="copy">
       <p class="eyebrow">Welcome Package</p>
@@ -75,7 +75,7 @@
 </section>
 
 <!-- ============================ PLAYER EXPERIENCE ============================ -->
-<section class="tile band-dark" data-band="a" data-screen-label="Player experience">
+<section class="tile band-dark" data-band="a">
   <div class="wrap pe">
     <div class="banner banner--art" style="order:2;">
       <img class="banner-art-img" src="assets/bull-lasso.webp" alt="Cowboyspin bull with lasso" style="right:-7%;top:50%;transform:translateY(-50%);width:min(62%,310px);">
@@ -96,7 +96,7 @@
 </section>
 
 <!-- ============================ ACTIVITIES ============================ -->
-<section class="tile band-light" id="activities" data-band="b" data-screen-label="Activities">
+<section class="tile band-light" id="activities" data-band="b">
   <div class="wrap">
     <div class="acts-head center">
       <p class="eyebrow">Always something to chase</p>
@@ -129,7 +129,7 @@
 </section>
 
 <!-- ============================ REWARDS ============================ -->
-<section class="tile band-dark" id="rewards" data-band="a" data-screen-label="Rewards">
+<section class="tile band-dark" id="rewards" data-band="a">
   <div class="wrap">
     <div class="acts-head center">
       <p class="eyebrow">Rewards that keep giving</p>
@@ -159,7 +159,7 @@
 </section>
 
 <!-- ============================ BONUS HUB ============================ -->
-<section class="tile band-dark2" id="hub" data-band="a" data-screen-label="Bonus hub">
+<section class="tile band-dark2" id="hub" data-band="a">
   <div class="wrap">
     <div class="acts-head">
       <p class="eyebrow">Bonus Hub</p>
@@ -177,7 +177,7 @@
 </section>
 
 <!-- ============================ PAYMENTS ============================ -->
-<section class="tile band-light" id="payments" data-band="b" data-screen-label="Payments">
+<section class="tile band-light" id="payments" data-band="b">
   <div class="wrap center">
     <p class="eyebrow">Fast, secure banking</p>
     <h2 class="h-tile" style="margin-top:14px;">Deposit and cash out your way.</h2>
@@ -201,7 +201,7 @@
 </section>
 
 <!-- ============================ FOOTER ============================ -->
-<footer class="tile band-foot" data-screen-label="Footer">
+<footer class="tile band-foot">
   <div class="wrap--wide" style="margin:0 auto;">
     <div class="foot-top">
       <div class="foot-brand">
@@ -277,10 +277,10 @@
 (function(){
   var burger=document.getElementById('burger');
   var drawer=document.getElementById('drawer');
-  if(burger){burger.addEventListener('click',function(){drawer.classList.add('open');});}
-  drawer.addEventListener('click',function(e){
+  if(burger&&drawer){burger.addEventListener('click',function(){drawer.classList.add('open');});}
+  if(drawer){drawer.addEventListener('click',function(e){
     if(e.target.hasAttribute('data-close')||e.target.closest('[data-close]')){drawer.classList.remove('open');}
-  });
+  });}
 })();
 </script>
 </body>
