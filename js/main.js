@@ -226,8 +226,15 @@
     };
   };
 
-  var flagSrc = function (flagCode) {
-    return '/assets/img/flags/' + flagCode + '.svg';
+  // инлайн-SVG флагов: не зависят от путей и всегда рендерятся в макете
+  var FLAG_SVG = {
+    'ie': '<svg class="lang-switcher__flag" width="22" height="16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" role="img" aria-hidden="true"><rect width="20" height="40" fill="#169b62"/><rect x="20" width="20" height="40" fill="#ffffff"/><rect x="40" width="20" height="40" fill="#ff883e"/></svg>',
+    'cz': '<svg class="lang-switcher__flag" width="22" height="16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" role="img" aria-hidden="true"><rect width="60" height="20" fill="#ffffff"/><rect y="20" width="60" height="20" fill="#d7141a"/><path d="M0 0 L30 20 L0 40 Z" fill="#11457e"/></svg>',
+    'dk': '<svg class="lang-switcher__flag" width="22" height="16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" role="img" aria-hidden="true"><rect width="60" height="40" fill="#c8102e"/><rect x="16" width="8" height="40" fill="#ffffff"/><rect y="16" width="60" height="8" fill="#ffffff"/></svg>',
+    'gr': '<svg class="lang-switcher__flag" width="22" height="16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 40" role="img" aria-hidden="true"><rect width="60" height="40" fill="#0d5eaf"/><g fill="#ffffff"><rect y="4.44" width="60" height="3.7"/><rect y="12.59" width="60" height="3.7"/><rect y="20.74" width="60" height="3.7"/><rect y="28.89" width="60" height="3.7"/><rect x="0" y="0" width="20" height="20.74" fill="#0d5eaf"/><rect x="8.15" width="3.7" height="20.74"/><rect y="8.52" width="20" height="3.7"/></g></svg>'
+  };
+  var flagMarkup = function (flagCode) {
+    return FLAG_SVG[flagCode] || FLAG_SVG['ie'] || '';
   };
 
   var chevronSvg = '<svg class="lang-switcher__chevron" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -241,14 +248,14 @@
       var isActive = lang === currentLocale;
       return '<li role="none">' +
         '<a class="lang-switcher__item' + (isActive ? ' is-active' : '') + '" href="' + alternates[lang] + '" role="option" aria-selected="' + (isActive ? 'true' : 'false') + '" data-lang="' + lang + '" hreflang="' + lang + '">' +
-        '<img class="lang-switcher__flag" src="' + flagSrc(meta.flag) + '" alt="" width="22" height="16" loading="lazy" />' +
+        flagMarkup(meta.flag) +
         '<span class="lang-switcher__label">' + meta.label + '</span>' +
         '</a></li>';
     }).join('');
 
     return '<div class="lang-switcher' + (variant === 'drawer' ? ' lang-switcher--drawer' : '') + '" data-variant="' + variant + '">' +
       '<button type="button" class="lang-switcher__toggle" aria-expanded="false" aria-haspopup="listbox" aria-label="Select language">' +
-      '<img class="lang-switcher__flag" src="' + flagSrc(currentMeta.flag) + '" alt="" width="22" height="16" />' +
+      flagMarkup(currentMeta.flag) +
       '<span class="lang-switcher__code">' + currentMeta.code + '</span>' +
       chevronSvg +
       '</button>' +

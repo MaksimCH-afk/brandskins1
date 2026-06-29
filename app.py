@@ -45,6 +45,9 @@ BUILD_EXCLUDE_TOP = {
     "app.py", "Dockerfile", "Dockerfile.dashboard", "Dockerfile.tools",
     "docker-compose.yml", "docker-compose.dashboard.yml", "requirements.txt",
     "DOCKER.md", "README.md", "BRANDING.md", ".gitignore", ".dockerignore",
+    # служебка production-сайта — в шаблоне-макете не нужна
+    "favicon.ico", "favicon.svg", "favicon-32x32.png", "apple-touch-icon.png",
+    "robots.txt", "sitemap.xml", ".htaccess",
 }
 BUILD_EXCLUDE_DIRS = {".git", "tools", "out", "refs", "__pycache__", "dashboard"}
 
@@ -347,7 +350,7 @@ DASHBOARD_HTML = r"""<!doctype html>
   .brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.3px}
   .dot{width:10px;height:10px;border-radius:50%;background:var(--gold);box-shadow:0 0 12px var(--gold)}
   .hactions{display:flex;gap:14px;align-items:center}
-  .wrap{display:grid;grid-template-columns:minmax(0,400px) 1fr;gap:20px;padding:20px 24px;max-width:1700px;margin:0 auto}
+  .wrap{display:grid;grid-template-columns:minmax(0,320px) 1fr;gap:16px;padding:14px 16px;max-width:1760px;margin:0 auto}
   @media (max-width:980px){.wrap{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
   .card h2{margin:0 0 4px;font-size:15px;letter-spacing:.4px;text-transform:uppercase;color:var(--gold)}
@@ -355,13 +358,14 @@ DASHBOARD_HTML = r"""<!doctype html>
   .mt{margin-top:14px}.muted{color:var(--muted)}
   code{font-family:ui-monospace,Menlo,monospace}
   .brands{display:flex;flex-direction:column;gap:10px}
-  .brow{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--panel-2);
-        border:1px solid var(--line);border-radius:12px;padding:12px 14px}
-  .brow .meta{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .brow{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--panel-2);
+        border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .brow .meta{display:flex;flex-direction:column;gap:5px;min-width:0}
   .brow .name{font-weight:600}
   .brow .file{color:var(--muted);font-size:12px;font-family:ui-monospace,Menlo,monospace}
-  .sw{display:flex;gap:5px;margin-top:2px}
-  .sw i{width:18px;height:18px;border-radius:5px;border:1px solid rgba(255,255,255,.12);display:inline-block}
+  .brow .apply{padding:7px 13px;font-size:13px}
+  .sw{display:flex;gap:5px;margin-top:1px}
+  .sw i{width:16px;height:16px;border-radius:5px;border:1px solid rgba(255,255,255,.12);display:inline-block}
   .badge{font-size:11px;padding:3px 9px;border-radius:999px;background:rgba(70,201,138,.15);
          color:var(--ok);border:1px solid rgba(70,201,138,.35);white-space:nowrap}
   button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);
@@ -383,13 +387,13 @@ DASHBOARD_HTML = r"""<!doctype html>
   details summary{cursor:pointer;color:var(--muted);font-size:13px}
   .preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
   .preview-head h2{margin:0}
-  .devrow{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+  .devrow{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
   .dev{display:flex;flex-direction:column;gap:8px;min-width:0}
   .devlabel{font-size:12px;color:var(--muted);letter-spacing:.3px}
   .frame{border:1px solid var(--line);border-radius:12px;background:#000}
   /* 1:1 кадры (мобильный/планшет): вертикальный скролл в отдельном жёлобе справа */
   .frame.fit{overflow-y:scroll;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--sbthumb) var(--sb)}
-  .frame.fit::-webkit-scrollbar{width:12px}
+  .frame.fit::-webkit-scrollbar{width:10px}
   .frame.fit::-webkit-scrollbar-track{background:var(--sb);border-radius:0 12px 12px 0}
   .frame.fit::-webkit-scrollbar-thumb{background:var(--sbthumb);border-radius:8px;border:3px solid var(--sb)}
   .frame.fit iframe{border:0;display:block;background:#000}
@@ -496,7 +500,7 @@ function sizeScale(fr){
 }
 function initPreview(){
   $$(".frame.fit").forEach(fr=>{
-    const w=+fr.dataset.w, vh=+fr.dataset.vh, sb=12;   // 12px — отдельный жёлоб под скролл
+    const w=+fr.dataset.w, vh=+fr.dataset.vh, sb=10;   // 12px — отдельный жёлоб под скролл
     fr.style.width=(w+sb)+"px"; fr.style.height=vh+"px";
     const f=fr.querySelector("iframe"); f.style.width=w+"px";
     f.addEventListener("load",()=>measureFit(f));

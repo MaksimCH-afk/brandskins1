@@ -718,7 +718,6 @@ a.btn { text-decoration: none; }
 
 @media (max-width: 620px) {
   .only-mobile { display: inline-flex; }
-  .hide-mobile { display: none !important; }
   .games-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
   .hub { grid-template-columns: 1fr; }
   .hub-card--feature { grid-column: auto; }
@@ -727,6 +726,29 @@ a.btn { text-decoration: none; }
   .footer__legal { flex-direction: column; align-items: flex-start; }
   .section-head { margin-bottom: 26px; }
   .hero__offer { padding: 28px 22px; }
+  /* компактная шапка */
+  .header__inner { gap: 10px; }
+  .header__actions { gap: 8px; }
+  .brand-logo { height: 30px; }
+  .header__actions .btn { padding: 9px 14px; font-size: 13.5px; }
+}
+
+/* узкие экраны: лого + переключатель языков + кнопки ужимаются по размеру */
+@media (max-width: 480px) {
+  .wrap { padding-inline: 12px; }
+  .header__inner { gap: 8px; }
+  .header__actions { gap: 7px; }
+  .brand-logo { height: 26px; }
+  .header__actions .btn { padding: 8px 11px; font-size: 12.5px; }
+}
+
+/* < 390px: бургер + лого + язык + ОДНА кнопка; вторая появляется с 390px */
+@media (max-width: 389px) {
+  .header__actions .hide-mobile { display: none !important; }
+  .wrap { padding-inline: 10px; }
+  .header__inner { gap: 7px; }
+  .brand-logo { height: 24px; }
+  .header__actions .btn { padding: 8px 10px; font-size: 12px; }
 }
 
 /* ============================================================
