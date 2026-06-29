@@ -12,7 +12,7 @@
 <!-- ============================ GLOBAL NAV ============================ -->
 <header class="nav">
   <div class="nav-inner">
-    <button class="nav-burger" id="burger" aria-label="Menu"><span></span><span></span><span></span></button>
+    <button class="nav-burger" id="burger" aria-label="Menu" aria-controls="drawer" aria-expanded="false"><span></span><span></span><span></span></button>
     <a href="#" aria-label="Cowboyspin home"><img class="nav-logo" src="assets/cowboyspin-logo.webp" alt="Cowboyspin"></a>
     <nav class="nav-links">
       <a href="#bonus">Bonuses</a>
@@ -27,6 +27,26 @@
     </div>
   </div>
 </header>
+
+<!-- ============================ MOBILE DRAWER ============================ -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<aside class="drawer" id="drawer" aria-label="Mobile menu">
+  <div class="drawer-top">
+    <img class="drawer-logo" src="assets/cowboyspin-logo.webp" alt="Cowboyspin">
+    <button class="drawer-close" id="drawerClose" type="button" aria-label="Close menu">&#10005;</button>
+  </div>
+  <nav class="drawer-links">
+    <a data-close href="#bonus">Bonuses</a>
+    <a data-close href="#activities">Games</a>
+    <a data-close href="#hub">Promotions</a>
+    <a data-close href="#payments">Banking</a>
+  </nav>
+  <div class="drawer-actions">
+    <a data-close href="#" class="btn btn-nav ghost btn-block">Log In</a>
+    <a data-close href="#" class="btn btn-primary btn-nav btn-block">Sign Up</a>
+  </div>
+</aside>
+
 
 <!-- ============================ HERO ============================ -->
 <section class="tile hero band-dark" data-band="a">
@@ -277,10 +297,20 @@
 (function(){
   var burger=document.getElementById('burger');
   var drawer=document.getElementById('drawer');
-  if(burger&&drawer){burger.addEventListener('click',function(){drawer.classList.add('open');});}
-  if(drawer){drawer.addEventListener('click',function(e){
-    if(e.target.hasAttribute('data-close')||e.target.closest('[data-close]')){drawer.classList.remove('open');}
-  });}
+  var overlay=document.getElementById('drawerOverlay');
+  var closeBtn=document.getElementById('drawerClose');
+  function setOpen(o){
+    if(!drawer||!overlay)return;
+    drawer.classList.toggle('open',o);
+    overlay.classList.toggle('open',o);
+    document.body.classList.toggle('no-scroll',o);
+    if(burger)burger.setAttribute('aria-expanded',o?'true':'false');
+  }
+  if(burger)burger.addEventListener('click',function(){setOpen(true);});
+  if(closeBtn)closeBtn.addEventListener('click',function(){setOpen(false);});
+  if(overlay)overlay.addEventListener('click',function(){setOpen(false);});
+  if(drawer)drawer.querySelectorAll('[data-close]').forEach(function(el){el.addEventListener('click',function(){setOpen(false);});});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')setOpen(false);});
 })();
 </script>
 </body>
