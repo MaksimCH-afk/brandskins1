@@ -1,18 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-Brandskins control panel + static site server.
+Brandskins control panel — управление НЕСКОЛЬКИМИ шаблонами.
 
-  /        -> сам статический сайт (из примонтированного репозитория /site)
-  /admin   -> панель управления:
-                - список тем с цветовыми превью и переключением на лету
-                - экстрактор: до 10 скриншотов (png/jpg/jpeg/webp),
-                  OCR названия бренда с логотипа, авто-палитра
-                - предпросмотр сайта в реальных разрешениях: 320 / 700 / 1440
-                - «Скачать макет»: готовый статический сайт с применённой темой (zip)
+Структура репозитория:
+  template1/   — статический сайт «Шаблон 1» (css/styles.css + css/brand.css + страницы)
+  template2/   — лендинг «Шаблон 2» (css/styles.css + css/brand.css + assets)
+  themes/      — ОБЩАЯ библиотека тем (brand.<name>.css в едином контракте переменных)
+  tools/       — экстрактор цветов
+
+Дашборд:
+  /        -> активный шаблон (превью/выдача), служит из его папки
+  /admin   -> панель: выбор шаблона (Шаблон 1/2), темы, экстрактор,
+              превью (320/700/1440), «Скачать макет» активного шаблона
 """
 import os
 import re
 import io
+import json
 import zipfile
 import shutil
 import subprocess
@@ -31,51 +35,72 @@ except Exception:
     _HAS_OCR = False
 
 SITE_ROOT = os.environ.get("SITE_ROOT", "/site")
-CSS_DIR = os.path.join(SITE_ROOT, "css")
+THEMES_DIR = os.path.join(SITE_ROOT, "themes")
 OUT_DIR = os.path.join(SITE_ROOT, "out")
 EXTRACTOR = os.path.join(SITE_ROOT, "tools", "extract_brand.py")
-STOCK_BACKUP = os.path.join(CSS_DIR, "brand.stock.css")
-ACTIVE = os.path.join(CSS_DIR, "brand.css")
+STATE_FILE = os.path.join(SITE_ROOT, ".active_template")
+
+TEMPLATES = {
+    "t1": {"label": "Шаблон 1", "dir": "template1"},
+    "t2": {"label": "Шаблон 2", "dir": "template2"},
+}
+DEFAULT_TEMPLATE = "t1"
 
 ALLOWED_EXT = {"png", "jpg", "jpeg", "webp"}
 MAX_IMAGES = 10
 
-# что не кладём в скачиваемый макет (служебное/сборочное)
 BUILD_EXCLUDE_TOP = {
-    "app.py", "Dockerfile", "Dockerfile.dashboard", "Dockerfile.tools",
-    "docker-compose.yml", "docker-compose.dashboard.yml", "requirements.txt",
-    "DOCKER.md", "README.md", "BRANDING.md", ".gitignore", ".dockerignore",
-    # служебка production-сайта — в шаблоне-макете не нужна
+    ".gitignore", ".dockerignore",
     "favicon.ico", "favicon.svg", "favicon-32x32.png", "apple-touch-icon.png",
     "robots.txt", "sitemap.xml", ".htaccess",
 }
-BUILD_EXCLUDE_DIRS = {".git", "tools", "out", "refs", "__pycache__", "dashboard"}
+BUILD_EXCLUDE_DIRS = {".git", "__pycache__"}
 
 OCR_STOP = {
     "logo", "review", "bonuses", "deposits", "app", "login", "log", "in",
     "withdraw", "register", "now", "menu", "placeholder", "section", "heading",
-    "label", "column", "row", "provider", "game", "title", "offer", "bonus",
+    "label", "column", "row", "provider", "game", "games", "title", "offer", "bonus",
     "terms", "apply", "all", "tab", "hot", "new", "footer", "casino", "legal",
     "privacy", "policy", "cookies", "responsible", "gaming", "conditions",
-    "main", "page", "goes", "here", "stat", "the", "and", "for", "your",
+    "main", "page", "goes", "here", "stat", "the", "and", "for", "your", "sign",
+    "up", "support", "promotions", "banking", "welcome", "bonus", "spins",
     "subsection", "frequently", "asked", "question", "lorem", "ipsum",
 }
 
 app = Flask(__name__)
 
 
-# ----------------------------------------------------------------------------- helpers
-def ensure_stock_backup():
+# ----------------------------------------------------------------------------- state
+def get_active():
     try:
-        if os.path.isfile(ACTIVE) and not os.path.isfile(STOCK_BACKUP):
-            shutil.copyfile(ACTIVE, STOCK_BACKUP)
-    except Exception as e:
-        app.logger.warning("stock backup failed: %s", e)
+        k = open(STATE_FILE, encoding="utf-8").read().strip()
+        if k in TEMPLATES:
+            return k
+    except Exception:
+        pass
+    return DEFAULT_TEMPLATE
 
 
-ensure_stock_backup()
+def set_active(key):
+    if key not in TEMPLATES:
+        return False
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            f.write(key)
+        return True
+    except Exception:
+        return False
 
 
+def tdir(key=None):
+    return os.path.join(SITE_ROOT, TEMPLATES[key or get_active()]["dir"])
+
+
+def active_brand_css():
+    return os.path.join(tdir(), "css", "brand.css")
+
+
+# ----------------------------------------------------------------------------- helpers
 def slugify(name):
     s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
     return s or "brand"
@@ -89,8 +114,7 @@ def brand_key_from_filename(fn):
 def parse_theme_colors(path):
     colors = {}
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            txt = f.read()
+        txt = open(path, encoding="utf-8", errors="replace").read()
     except Exception:
         return colors
     for var in ("--c-accent", "--c-cta", "--c-bg", "--surface"):
@@ -102,18 +126,19 @@ def parse_theme_colors(path):
 
 def list_brands():
     active_bytes = None
-    if os.path.isfile(ACTIVE):
-        with open(ACTIVE, "rb") as f:
+    ab = active_brand_css()
+    if os.path.isfile(ab):
+        with open(ab, "rb") as f:
             active_bytes = f.read()
     brands = []
-    if os.path.isdir(CSS_DIR):
-        for fn in sorted(os.listdir(CSS_DIR)):
+    if os.path.isdir(THEMES_DIR):
+        for fn in sorted(os.listdir(THEMES_DIR)):
             if not fn.startswith("brand.") or not fn.endswith(".css") or fn == "brand.css":
                 continue
             key = brand_key_from_filename(fn)
             if not key:
                 continue
-            path = os.path.join(CSS_DIR, fn)
+            path = os.path.join(THEMES_DIR, fn)
             try:
                 with open(path, "rb") as f:
                     is_active = (f.read() == active_bytes)
@@ -123,14 +148,13 @@ def list_brands():
                 "key": key, "file": fn, "label": key.replace(".", " · "),
                 "active": is_active, "colors": parse_theme_colors(path),
             })
-    any_active = any(b["active"] for b in brands)
-    return brands, any_active
+    return brands, any(b["active"] for b in brands)
 
 
-def safe_site_path(rel):
+def safe_path(base, rel):
     rel = rel.lstrip("/")
-    full = os.path.realpath(os.path.join(SITE_ROOT, rel))
-    root = os.path.realpath(SITE_ROOT)
+    full = os.path.realpath(os.path.join(base, rel))
+    root = os.path.realpath(base)
     if full != root and not full.startswith(root + os.sep):
         return None
     return full
@@ -171,30 +195,50 @@ def detect_brand_name(paths):
 
 def next_auto_name():
     i = 1
-    while os.path.isfile(os.path.join(CSS_DIR, "brand.brand%d.css" % i)):
+    while os.path.isfile(os.path.join(THEMES_DIR, "brand.brand%d.css" % i)):
         i += 1
     return "brand%d" % i
 
 
-# ----------------------------------------------------------------------------- API
+# ----------------------------------------------------------------------------- API: templates
+@app.get("/admin/api/templates")
+def api_templates():
+    return jsonify({
+        "active": get_active(),
+        "templates": [{"key": k, "label": v["label"]} for k, v in TEMPLATES.items()],
+    })
+
+
+@app.post("/admin/api/templates")
+def api_templates_set():
+    data = request.get_json(silent=True) or request.form
+    key = (data.get("key") or "").strip()
+    if set_active(key):
+        return jsonify({"ok": True, "active": key})
+    return jsonify({"ok": False, "error": "Неизвестный шаблон: %s" % key}), 400
+
+
+# ----------------------------------------------------------------------------- API: themes
 @app.get("/admin/api/brands")
 def api_brands():
     brands, any_active = list_brands()
-    return jsonify({"brands": brands, "custom": not any_active, "ocr": _HAS_OCR})
+    return jsonify({"brands": brands, "custom": not any_active,
+                    "ocr": _HAS_OCR, "active_template": get_active()})
 
 
 @app.post("/admin/api/switch")
 def api_switch():
     data = request.get_json(silent=True) or request.form
     key = (data.get("key") or "").strip()
-    src = os.path.join(CSS_DIR, "brand.%s.css" % key)
+    src = os.path.join(THEMES_DIR, "brand.%s.css" % key)
     if not key or not os.path.isfile(src):
         return jsonify({"ok": False, "error": "Тема не найдена: %s" % key}), 400
     try:
-        shutil.copyfile(src, ACTIVE)
+        os.makedirs(os.path.dirname(active_brand_css()), exist_ok=True)
+        shutil.copyfile(src, active_brand_css())
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-    return jsonify({"ok": True, "active": key})
+    return jsonify({"ok": True, "active": key, "template": get_active()})
 
 
 @app.post("/admin/api/extract")
@@ -237,8 +281,9 @@ def api_extract():
             name = detected or next_auto_name()
         slug = slugify(name)
 
+        os.makedirs(THEMES_DIR, exist_ok=True)
         os.makedirs(OUT_DIR, exist_ok=True)
-        out_css = os.path.join(CSS_DIR, "brand.%s.css" % slug)
+        out_css = os.path.join(THEMES_DIR, "brand.%s.css" % slug)
         report = os.path.join(OUT_DIR, "%s-report.md" % slug)
         cmd = [sys.executable, EXTRACTOR, *img_paths,
                "--name", name, "-o", out_css, "--report", report]
@@ -250,8 +295,7 @@ def api_extract():
         proc = subprocess.run(cmd, cwd=SITE_ROOT, capture_output=True, text=True, timeout=300)
         report_text = ""
         if os.path.isfile(report):
-            with open(report, "r", encoding="utf-8", errors="replace") as rf:
-                report_text = rf.read()
+            report_text = open(report, encoding="utf-8", errors="replace").read()
         ok = proc.returncode == 0 and os.path.isfile(out_css)
         return jsonify({
             "ok": ok, "name": name, "detected": detected, "slug": slug,
@@ -269,8 +313,8 @@ def api_extract():
 
 @app.get("/admin/api/build")
 def api_build():
-    """Собрать готовый статический сайт с текущей темой в zip."""
-    root = os.path.realpath(SITE_ROOT)
+    """Готовый макет АКТИВНОГО шаблона (zip) с применённой темой."""
+    root = os.path.realpath(tdir())
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
         for dirpath, dirs, files in os.walk(root):
@@ -281,16 +325,15 @@ def api_build():
                     continue
                 if fn.endswith((".pyc", ".pyo")):
                     continue
-                # в макет кладём только активную brand.css (без вариантов/стока)
                 if rel_dir == "css" and re.match(r"^brand\..+\.css$", fn) and fn != "brand.css":
                     continue
                 full = os.path.join(dirpath, fn)
                 z.write(full, os.path.relpath(full, root))
     mem.seek(0)
     brands, _ = list_brands()
-    active = next((b["key"] for b in brands if b["active"]), "build")
-    return send_file(mem, mimetype="application/zip", as_attachment=True,
-                     download_name="brandskins-%s.zip" % slugify(active))
+    theme = next((b["key"] for b in brands if b["active"]), "build")
+    dname = "%s-%s.zip" % (TEMPLATES[get_active()]["dir"], slugify(theme))
+    return send_file(mem, mimetype="application/zip", as_attachment=True, download_name=dname)
 
 
 @app.get("/admin")
@@ -299,7 +342,7 @@ def admin():
     return Response(DASHBOARD_HTML, mimetype="text/html; charset=utf-8")
 
 
-# ----------------------------------------------------------------------------- static site
+# ----------------------------------------------------------------------------- static (active template)
 def _send_no_store(full):
     ctype, _ = mimetypes.guess_type(full)
     resp = send_file(full, mimetype=ctype) if ctype else send_file(full)
@@ -309,7 +352,7 @@ def _send_no_store(full):
 
 @app.get("/")
 def root_index():
-    idx = os.path.join(SITE_ROOT, "index.html")
+    idx = os.path.join(tdir(), "index.html")
     return _send_no_store(idx) if os.path.isfile(idx) else abort(404)
 
 
@@ -317,7 +360,8 @@ def root_index():
 def static_site(relpath):
     if relpath == "admin" or relpath.startswith("admin/"):
         abort(404)
-    full = safe_site_path(relpath)
+    base = tdir()
+    full = safe_path(base, relpath)
     if not full:
         abort(404)
     if os.path.isfile(full):
@@ -344,12 +388,16 @@ DASHBOARD_HTML = r"""<!doctype html>
   body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
        background:radial-gradient(1200px 600px at 80% -10%,#16201a,transparent),var(--bg);color:var(--txt);min-height:100vh}
   a{color:var(--gold)}
-  header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 24px;
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;
          border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5;
-         background:rgba(14,20,17,.85);backdrop-filter:blur(8px)}
+         background:rgba(14,20,17,.85);backdrop-filter:blur(8px);flex-wrap:wrap}
   .brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.3px}
   .dot{width:10px;height:10px;border-radius:50%;background:var(--gold);box-shadow:0 0 12px var(--gold)}
-  .hactions{display:flex;gap:14px;align-items:center}
+  .hactions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  /* segmented toggle шаблонов */
+  .tpl{display:inline-flex;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:3px}
+  .tpl button{border:0;background:transparent;color:var(--muted);padding:8px 16px;border-radius:9px;font-weight:700;cursor:pointer;transition:.15s}
+  .tpl button.on{background:linear-gradient(180deg,var(--gold-hi),var(--gold) 55%,var(--gold-deep));color:#1a130a}
   .wrap{display:grid;grid-template-columns:minmax(0,320px) 1fr;gap:16px;padding:14px 16px;max-width:1760px;margin:0 auto}
   @media (max-width:980px){.wrap{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
@@ -391,13 +439,11 @@ DASHBOARD_HTML = r"""<!doctype html>
   .dev{display:flex;flex-direction:column;gap:8px;min-width:0}
   .devlabel{font-size:12px;color:var(--muted);letter-spacing:.3px}
   .frame{border:1px solid var(--line);border-radius:12px;background:#000}
-  /* 1:1 кадры (мобильный/планшет): вертикальный скролл в отдельном жёлобе справа */
   .frame.fit{overflow-y:scroll;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--sbthumb) var(--sb)}
   .frame.fit::-webkit-scrollbar{width:10px}
   .frame.fit::-webkit-scrollbar-track{background:var(--sb);border-radius:0 12px 12px 0}
   .frame.fit::-webkit-scrollbar-thumb{background:var(--sbthumb);border-radius:8px;border:3px solid var(--sb)}
   .frame.fit iframe{border:0;display:block;background:#000}
-  /* ПК: масштаб под ширину карточки, вся страница, без скролла */
   .frame.scale{position:relative;width:100%;overflow:hidden}
   .frame.scale .screen{position:absolute;top:0;left:0;transform-origin:top left}
   .frame.scale iframe{width:100%;height:100%;border:0;display:block;background:#000}
@@ -412,6 +458,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <header>
   <div class="brand"><span class="dot"></span> Brandskins · панель управления</div>
   <div class="hactions">
+    <div class="tpl" id="tpl"></div>
     <button id="dl-build" class="apply" style="padding:8px 14px">Скачать макет</button>
     <a href="/" target="_blank" rel="noopener">Открыть сайт ↗</a>
   </div>
@@ -421,17 +468,17 @@ DASHBOARD_HTML = r"""<!doctype html>
   <div class="col">
     <div class="card">
       <h2>Темы брендов</h2>
-      <p class="sub">Применение копирует тему в <code>css/brand.css</code> — сайт обновляется без пересборки.</p>
+      <p class="sub">Тема применяется к <b id="cur-tpl">активному шаблону</b> (копируется в его <code>css/brand.css</code>) — без пересборки.</p>
       <div class="brands" id="brands">загрузка…</div>
     </div>
 
     <div class="card mt">
       <h2>Экстрактор цветов</h2>
-      <p class="sub">Загрузите до 10 скриншотов бренда — палитра и тема соберутся автоматически.</p>
+      <p class="sub">Загрузите до 10 скриншотов бренда — тема соберётся и попадёт в общую библиотеку (работает для обоих шаблонов).</p>
       <div class="field">
         <label>Название бренда <span class="muted">(необязательно)</span></label>
         <input type="text" id="ex-name" placeholder="оставьте пустым — распознаю с логотипа">
-        <div class="hint" id="ocr-hint">Если поле пустое — название считывается с логотипа на скриншотах (OCR). Не распозналось — будет авто-имя.</div>
+        <div class="hint" id="ocr-hint">Если поле пустое — название считывается с логотипа на скриншотах (OCR). Не распозналось — авто-имя.</div>
       </div>
       <div class="field">
         <label>Скриншоты — до 10 файлов (png, jpg, jpeg, webp)</label>
@@ -444,9 +491,8 @@ DASHBOARD_HTML = r"""<!doctype html>
         </label>
       </div>
       <div class="hint">
-        <b>Акцент</b> — главный выделяющий цвет (кнопки, активные пункты меню, цифры, рамки, свечение).
-        Основную тему экстрактор делает сам. <b>Варианты акцента = N</b> создаёт N запасных тем
-        с другими акцентами на выбор (<code>…alt1.css</code>, <code>…alt2.css</code>);
+        <b>Акцент</b> — главный выделяющий цвет (кнопки, активные пункты, цифры, рамки).
+        <b>Варианты акцента = N</b> создаёт N запасных тем с другими акцентами (<code>…alt1.css</code>…);
         фактическое число ограничено числом разных цветов на скриншотах.
       </div>
       <div class="mt"><button id="ex-run" class="apply">Сгенерировать тему</button></div>
@@ -457,7 +503,7 @@ DASHBOARD_HTML = r"""<!doctype html>
   <div class="col">
     <div class="card">
       <div class="preview-head">
-        <h2>Превью сайта</h2>
+        <h2>Превью · <span id="pv-tpl">…</span></h2>
         <button id="reload">Обновить ⟳</button>
       </div>
       <div class="devrow">
@@ -486,49 +532,61 @@ const $$=s=>Array.from(document.querySelectorAll(s));
 function toast(m,k){const t=$("#toast");t.textContent=m;t.className="toast show "+(k||"");setTimeout(()=>t.className="toast",3400);}
 function escapeHtml(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 
-function pageHeight(f){
-  try{const d=f.contentDocument;return Math.max(d.documentElement.scrollHeight,d.body?d.body.scrollHeight:0)||0;}
-  catch(e){return 0;}
-}
-function measureFit(f){const h=pageHeight(f);f.style.height=(h||2600)+"px";}
+let TEMPLATES=[], ACTIVE_TPL="t1";
+function tplLabel(k){const t=TEMPLATES.find(x=>x.key===k);return t?t.label:k;}
+
+function pageHeight(f){try{const d=f.contentDocument;return Math.max(d.documentElement.scrollHeight,d.body?d.body.scrollHeight:0)||0;}catch(e){return 0;}}
+function measureFit(f){f.style.height=(pageHeight(f)||2600)+"px";}
 function sizeScale(fr){
   const w=+fr.dataset.w, avail=fr.clientWidth||1, k=avail/w;
   const sc=fr.querySelector(".screen"), f=fr.querySelector("iframe");
   const h=pageHeight(f)||2200;
-  sc.style.width=w+"px"; sc.style.height=h+"px"; sc.style.transform="scale("+k+")";
-  fr.style.height=(h*k)+"px";
+  sc.style.width=w+"px"; sc.style.height=h+"px"; sc.style.transform="scale("+k+")"; fr.style.height=(h*k)+"px";
 }
 function initPreview(){
   $$(".frame.fit").forEach(fr=>{
-    const w=+fr.dataset.w, vh=+fr.dataset.vh, sb=10;   // 12px — отдельный жёлоб под скролл
+    const w=+fr.dataset.w, vh=+fr.dataset.vh, sb=10;
     fr.style.width=(w+sb)+"px"; fr.style.height=vh+"px";
     const f=fr.querySelector("iframe"); f.style.width=w+"px";
-    f.addEventListener("load",()=>measureFit(f));
-    measureFit(f);
+    f.addEventListener("load",()=>measureFit(f)); measureFit(f);
   });
-  $$(".frame.scale").forEach(fr=>{
-    const f=fr.querySelector("iframe");
-    f.addEventListener("load",()=>sizeScale(fr));
-    sizeScale(fr);
-  });
+  $$(".frame.scale").forEach(fr=>{const f=fr.querySelector("iframe");f.addEventListener("load",()=>sizeScale(fr));sizeScale(fr);});
 }
 let rt;window.addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(()=>$$(".frame.scale").forEach(sizeScale),120);});
-
-function reloadPreview(){
-  const t=Date.now();
-  ["pv-mobile","pv-tablet","pv-desktop"].forEach(id=>{const f=document.getElementById(id);if(f)f.src="/?_t="+t;});
-}
+function reloadPreview(){const t=Date.now();["pv-mobile","pv-tablet","pv-desktop"].forEach(id=>{const f=document.getElementById(id);if(f)f.src="/?_t="+t;});}
 $("#reload").onclick=reloadPreview;
-$("#dl-build").onclick=()=>{toast("Собираю макет…","ok");window.location.href="/admin/api/build";};
+$("#dl-build").onclick=()=>{toast("Собираю макет "+tplLabel(ACTIVE_TPL)+"…","ok");window.location.href="/admin/api/build";};
+
+function renderTplToggle(){
+  const box=$("#tpl");box.innerHTML="";
+  TEMPLATES.forEach(t=>{
+    const b=document.createElement("button");b.textContent=t.label;
+    if(t.key===ACTIVE_TPL)b.className="on";
+    b.onclick=()=>switchTemplate(t.key);box.appendChild(b);
+  });
+  $("#cur-tpl").textContent=tplLabel(ACTIVE_TPL);
+  $("#pv-tpl").textContent=tplLabel(ACTIVE_TPL);
+}
+async function loadTemplates(){
+  const d=await (await fetch("/admin/api/templates")).json();
+  TEMPLATES=d.templates;ACTIVE_TPL=d.active;renderTplToggle();
+}
+async function switchTemplate(key){
+  if(key===ACTIVE_TPL)return;
+  const r=await fetch("/admin/api/templates",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})});
+  const d=await r.json();
+  if(d.ok){ACTIVE_TPL=key;renderTplToggle();toast("Шаблон: "+tplLabel(key),"ok");await loadBrands();reloadPreview();}
+  else toast(d.error||"Ошибка","err");
+}
 
 async function loadBrands(){
   const box=$("#brands");
   try{
-    const r=await fetch("/admin/api/brands");const d=await r.json();
-    if(!d.ocr)$("#ocr-hint").innerHTML="OCR недоступен в этом контейнере — название берётся из поля или авто-имя. Пересоберите образ, чтобы включить распознавание с логотипа.";
+    const d=await (await fetch("/admin/api/brands")).json();
+    if(!d.ocr)$("#ocr-hint").innerHTML="OCR недоступен в этом контейнере — название берётся из поля или авто-имя.";
     box.innerHTML="";
     if(d.custom){const n=document.createElement("div");n.className="muted";n.style.marginBottom="10px";
-      n.textContent="Активная brand.css изменена вручную и не совпадает ни с одной темой.";box.appendChild(n);}
+      n.textContent="Активная brand.css шаблона изменена вручную и не совпадает ни с одной темой.";box.appendChild(n);}
     d.brands.forEach(b=>{
       const row=document.createElement("div");row.className="brow";
       const meta=document.createElement("div");meta.className="meta";
@@ -542,15 +600,14 @@ async function loadBrands(){
       else{const bt=document.createElement("button");bt.className="apply";bt.textContent="Применить";bt.onclick=()=>switchBrand(b.key,bt);right.appendChild(bt);}
       row.appendChild(meta);row.appendChild(right);box.appendChild(row);
     });
-    if(!d.brands.length)box.innerHTML="<div class='muted'>Тем не найдено в css/</div>";
+    if(!d.brands.length)box.innerHTML="<div class='muted'>Тем не найдено в themes/</div>";
   }catch(e){box.innerHTML="<div class='muted'>Ошибка загрузки: "+e+"</div>";}
 }
 async function switchBrand(key,btn){
   if(btn){btn.disabled=true;btn.textContent="…";}
   try{
-    const r=await fetch("/admin/api/switch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})});
-    const d=await r.json();
-    if(d.ok){toast("Тема применена: "+key,"ok");await loadBrands();reloadPreview();}else toast(d.error||"Ошибка","err");
+    const d=await (await fetch("/admin/api/switch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key})})).json();
+    if(d.ok){toast("Тема «"+key+"» → "+tplLabel(ACTIVE_TPL),"ok");await loadBrands();reloadPreview();}else toast(d.error||"Ошибка","err");
   }catch(e){toast(String(e),"err");}
   finally{if(btn){btn.disabled=false;btn.textContent="Применить";}}
 }
@@ -566,10 +623,10 @@ $("#ex-run").onclick=async()=>{
   const btn=$("#ex-run");btn.disabled=true;btn.textContent="Обработка…";
   const res=$("#ex-result");res.innerHTML="<span class='muted'>Запуск экстрактора…</span>";
   try{
-    const r=await fetch("/admin/api/extract",{method:"POST",body:fd});const d=await r.json();
+    const d=await (await fetch("/admin/api/extract",{method:"POST",body:fd})).json();
     if(d.ok){
       toast("Создана тема "+d.file,"ok");
-      let html="<p class='muted'>Тема: <b style='color:var(--txt)'>"+escapeHtml(d.name)+"</b> → <code>css/"+escapeHtml(d.file)+"</code></p>";
+      let html="<p class='muted'>Тема: <b style='color:var(--txt)'>"+escapeHtml(d.name)+"</b> → <code>themes/"+escapeHtml(d.file)+"</code> (нажмите «Применить» в списке).</p>";
       if(d.detected)html+="<p class='muted'>Название распознано с логотипа: <b style='color:var(--txt)'>"+escapeHtml(d.detected)+"</b></p>";
       if(d.report)html+="<details open><summary>Отчёт по палитре</summary><pre>"+escapeHtml(d.report)+"</pre></details>";
       res.innerHTML=html;await loadBrands();
@@ -578,9 +635,8 @@ $("#ex-run").onclick=async()=>{
   finally{btn.disabled=false;btn.textContent="Сгенерировать тему";}
 };
 
-loadBrands();
-initPreview();
-window.addEventListener("load",()=>setTimeout(()=>{$$(".frame.fit").forEach(fr=>measureFit(fr.querySelector("iframe")));$$(".frame.scale").forEach(sizeScale);},120));
+(async()=>{await loadTemplates();await loadBrands();initPreview();})();
+window.addEventListener("load",()=>setTimeout(()=>{$$(".frame.fit").forEach(fr=>measureFit(fr.querySelector("iframe")));$$(".frame.scale").forEach(sizeScale);},150));
 </script>
 </body>
 </html>
